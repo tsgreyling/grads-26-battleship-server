@@ -1,0 +1,17 @@
+{
+  "name": "battleship-server",
+  "version": "1.0.0",
+  "description": "Secure WebSocket server for 2-player battleship game",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts",
+    "gen-certs": "openssl req -x509 -newkey rsa:4096 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes -subj \"/CN=localhost\""
+  },
+  "keywords": ["battleship", "websocket", "game", "bun"],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
