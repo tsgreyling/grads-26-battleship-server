@@ -140,6 +140,11 @@ export interface LoginMessage {
   password: string;
 }
 
+export interface ResumeMessage {
+  type: "resume";
+  sessionToken: string;
+}
+
 export interface LogoutMessage {
   type: "logout";
 }
@@ -180,6 +185,7 @@ export interface ForfeitMessage {
 export type ClientMessage =
   | RegisterMessage
   | LoginMessage
+  | ResumeMessage
   | LogoutMessage
   | ListPlayersMessage
   | SendInviteMessage
@@ -271,6 +277,29 @@ export interface WaitingForOpponentMessage {
   type: "waiting_for_opponent";
 }
 
+/** Serialized ship for reconnection (hits as array for JSON). */
+export interface SerializedPlacedShip {
+  type: ShipType;
+  tiles: string[];
+  hits: string[];
+}
+
+/** One shot the player has made (for reconnection). */
+export interface SerializedShot {
+  coordinate: string;
+  hit: boolean;
+  sunk: ShipType | null;
+}
+
+/** Sent on reconnection so client can restore board and shot history. */
+export interface ReconnectGameStateMessage {
+  type: "reconnect_game_state";
+  /** Current ship placements and hits (setup or playing). Omitted if no ships placed yet. */
+  ships?: SerializedPlacedShip[];
+  /** Shots this player has made (playing only). */
+  shots?: SerializedShot[];
+}
+
 export interface ShotResultMessage {
   type: "shot_result";
   coordinate: string;
@@ -345,6 +374,7 @@ export type ServerMessage =
   | ShipsRejectedMessage
   | GameStartMessage
   | WaitingForOpponentMessage
+  | ReconnectGameStateMessage
   | ShotResultMessage
   | ShotFiredMessage
   | ShipSunkMessage

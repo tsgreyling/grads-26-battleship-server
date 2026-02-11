@@ -1,6 +1,9 @@
 import type { ServerWebSocket } from "bun";
 import type { WebSocketData } from "./types";
-import { handleMessage, handleDisconnect } from "./protocol/handler";
+import { handleMessage, handleDisconnect, applyReconnectionState } from "./protocol/handler";
+import { getUsernameForToken } from "./auth/auth";
+import { attachWebSocketToSession } from "./auth/session";
+import { getUser } from "./user/user";
 import { cleanupRateLimits } from "./middleware/rateLimit";
 import { error as logError } from "./logger";
 
@@ -47,10 +50,13 @@ export function createServer(config: ServerConfig) {
         }
       }
 
+      const token = url.searchParams.get("token");
+      const username = getUsernameForToken(token);
+
       const success = server.upgrade(req, {
         data: {
-          sessionToken: null,
-          username: null,
+          sessionToken: username && token ? token : null,
+          username: username ?? null,
         },
       });
 
@@ -65,6 +71,29 @@ export function createServer(config: ServerConfig) {
     websocket: {
       open(ws: ServerWebSocket<WebSocketData>) {
         console.log(`[WebSocket] New connection`);
+        if (ws.data.sessionToken && ws.data.username) {
+          const session = attachWebSocketToSession(ws.data.sessionToken, ws);
+          if (session) {
+            const user = getUser(session.username);
+            if (user) {
+              ws.send(
+                JSON.stringify({
+                  type: "auth_success",
+                  sessionToken: session.token,
+                  user: { username: user.username, stats: user.stats },
+                })
+              );
+              applyReconnectionState(ws, session.username);
+            }
+          } else {
+            ws.send(
+              JSON.stringify({
+                type: "auth_error",
+                message: "Session expired or invalid",
+              })
+            );
+          }
+        }
       },
 
       async message(ws: ServerWebSocket<WebSocketData>, message: string | Buffer) {

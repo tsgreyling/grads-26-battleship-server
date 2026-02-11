@@ -70,10 +70,13 @@ export function createSession(
           reason: "logged_in_elsewhere",
         };
         existingSession.ws.send(JSON.stringify(kickMessage));
-        existingSession.ws.close(1000, "Logged in from another location");
       } catch (err) {
         logError("Session", `Failed to kick existing session (username: ${username})`, err);
+      }
+      try {
         existingSession.ws.close(1000, "Logged in from another location");
+      } catch (err) {
+        logError("Session", `Error closing session (username: ${username})`, err);
       }
     }
     // Remove old session
@@ -147,6 +150,41 @@ export function clearSessionWebSocket(token: string): void {
   if (session) {
     session.ws = null;
   }
+}
+
+/**
+ * Attach a WebSocket to an existing session (resume). If the session already has
+ * a different WebSocket, that connection is kicked. Returns the session if valid.
+ */
+export function attachWebSocketToSession(
+  token: string,
+  ws: ServerWebSocket<WebSocketData>
+): Session | undefined {
+  const session = getSession(token);
+  if (!session) return undefined;
+
+  if (session.ws != null && session.ws !== ws) {
+    try {
+      const kickMessage: KickedMessage = {
+        type: "kicked",
+        reason: "logged_in_elsewhere",
+      };
+      session.ws.send(JSON.stringify(kickMessage));
+    } catch (err) {
+      logError("Session", `Failed to kick existing session (username: ${session.username})`, err);
+    }
+    try {
+      session.ws.close(1000, "Logged in from another location");
+    } catch (err) {
+      logError("Session", `Error closing session (username: ${session.username})`, err);
+    }
+  }
+
+  session.ws = ws;
+  ws.data.sessionToken = token;
+  ws.data.username = session.username;
+
+  return session;
 }
 
 export function getOnlineUsers(): string[] {

@@ -25,6 +25,12 @@ export function parseMessage(raw: string): ClientMessage | null {
         }
         return data as ClientMessage;
 
+      case "resume":
+        if (typeof data.sessionToken !== "string") {
+          return null;
+        }
+        return data as ClientMessage;
+
       case "logout":
       case "list_players":
       case "forfeit":
@@ -117,7 +123,7 @@ export function sanitizeUsername(username: string): string {
  * Check if a message requires authentication.
  */
 export function requiresAuth(messageType: string): boolean {
-  return messageType !== "register" && messageType !== "login";
+  return messageType !== "register" && messageType !== "login" && messageType !== "resume";
 }
 
 /**

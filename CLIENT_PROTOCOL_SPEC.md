@@ -126,11 +126,22 @@ Client -> Server:
 
 Success/failure shapes are same as register.
 
-If same user logs in on another connection, older connection receives:
+If same user logs in (or resumes with the same token) on another connection, the older connection receives:
 
 ```json
 { "type": "kicked", "reason": "logged_in_elsewhere" }
 ```
+
+## Resume
+
+Client -> Server (send automatically on connect when you have a stored session token):
+
+```json
+{ "type": "resume", "sessionToken": "<uuid from auth_success>" }
+```
+
+Success: same as login — `auth_success` with `sessionToken` and `user`.  
+Failure: `auth_error` with message e.g. "Session expired or invalid".
 
 ## Username and Password Rules
 
@@ -138,12 +149,28 @@ If same user logs in on another connection, older connection receives:
 - Username allowed chars: letters, numbers, underscore.
 - Password minimum length: 6.
 
+## Resume session (automatic reconnection)
+
+After login or register, the server returns a `sessionToken` in `auth_success`. Store it (e.g. in localStorage). When the user refreshes or reconnects:
+
+1. **Option A — Token in URL (fully automatic)**  
+   Connect with the token in the query string:  
+   `wss://host/?token=<sessionToken>`  
+   The server will restore the session during the upgrade and send `auth_success` plus any game state without the client sending a message.
+
+2. **Option B — Resume message**  
+   Connect as usual, then send **as the first message** (no user click):  
+   `{ "type": "resume", "sessionToken": "<stored token>" }`  
+   The server responds with `auth_success` or `auth_error` ("Session expired or invalid").  
+   Clients **should** send `resume` automatically on open when they have a stored token.
+
+If the user was in a game, the server sends reconnection state (see **Reconnect game state** below) so ship placements and progress are not lost.
+
 ## Session Notes (Important)
 
 - Sessions expire after 24 hours.
-- Current protocol is tied to the open WebSocket connection.
-- There is no separate "resume by token" message right now.
-- If socket drops, reconnect and login again.
+- The session is tied to the **auth token**; a new WebSocket can reattach to the same session via `resume` or `?token=...`.
+- Store `sessionToken` from `auth_success` and use it to resume on reconnect so the user does not have to log in again.
 
 ## Lobby and Invite Flow
 
@@ -288,6 +315,31 @@ When both players are ready:
 ```json
 { "type": "game_start", "yourTurn": true, "opponent": "player2" }
 ```
+
+## Reconnect game state
+
+When a user reconnects (resume or `?token=...`) and they are already in a game, the server sends `reconnect_game_state` so the client can restore the board and progress without losing ship placements or shot history.
+
+Server -> Client (after `game_start` when reconnecting in **playing** phase, or after `waiting_for_opponent` when in **setup** with ships already placed):
+
+```json
+{
+  "type": "reconnect_game_state",
+  "ships": [
+    { "type": "carrier", "tiles": ["A1", "A2", "A3", "A4", "A5"], "hits": ["A3"] },
+    { "type": "battleship", "tiles": ["C3", "D3", "E3", "F3"], "hits": [] }
+  ],
+  "shots": [
+    { "coordinate": "B2", "hit": false, "sunk": null },
+    { "coordinate": "D4", "hit": true, "sunk": "cruiser" }
+  ]
+}
+```
+
+- **ships** (optional): Your current ship placements and which tiles have been hit. Omitted if you have not placed ships yet. Use this to restore your defensive board.
+- **shots** (optional): Shots you have made (playing phase only). Each has `coordinate`, `hit` (boolean), and `sunk` (ship type if that shot sank a ship, else `null`). Use this to restore your attack board.
+
+Restore local state from this message so the user can continue where they left off after a refresh.
 
 ## Gameplay (Turns and Shooting)
 
@@ -436,7 +488,7 @@ Implementation detail: rate limiting currently applies only for authenticated us
 
 - Auth/session: `auth_success`, `auth_error`, `kicked`, `logout_success`
 - Lobby/invite: `player_list`, `invite_sent`, `invite_received`, `invite_accepted`, `invite_declined`, `invite_cancelled`, `invite_error`
-- Setup/gameplay: `ships_accepted`, `ships_rejected`, `waiting_for_opponent`, `game_start`, `shot_result`, `shot_fired`, `ship_sunk`, `turn_change`, `game_over`, `game_error`
+- Setup/gameplay: `ships_accepted`, `ships_rejected`, `waiting_for_opponent`, `game_start`, `reconnect_game_state`, `shot_result`, `shot_fired`, `ship_sunk`, `turn_change`, `game_over`, `game_error`
 - Connectivity/control: `opponent_disconnected`, `opponent_reconnected`, `error`, `rate_limited`
 
 ## Practical Tips for Junior Devs
