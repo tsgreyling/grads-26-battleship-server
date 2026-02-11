@@ -1,10 +1,11 @@
 import { createServer, shutdownServer } from "./server";
 import { stopSessionCleanup } from "./auth/session";
 import { stopInviteCleanup } from "./lobby/invite";
+import { error as logError } from "./logger";
 
 // Configuration from environment variables
 const PORT = parseInt(process.env.PORT || "3000", 10);
-const HOSTNAME = process.env.HOSTNAME || "0.0.0.0";
+const HOSTNAME = process.env.SERVER_HOST || "0.0.0.0";
 const TLS_KEY_PATH = process.env.TLS_KEY_PATH || "./certs/key.pem";
 const TLS_CERT_PATH = process.env.TLS_CERT_PATH || "./certs/cert.pem";
 const USE_TLS = process.env.USE_TLS !== "false";
@@ -21,12 +22,10 @@ async function main() {
     const certFile = Bun.file(TLS_CERT_PATH);
 
     if (!(await keyFile.exists()) || !(await certFile.exists())) {
-      console.error("\nTLS certificates not found!");
-      console.error("Please generate certificates with:");
-      console.error(
-        `  openssl req -x509 -newkey rsa:4096 -keyout ${TLS_KEY_PATH} -out ${TLS_CERT_PATH} -days 365 -nodes -subj "/CN=localhost"`
+      logError(
+        "Startup",
+        `TLS certificates not found (key: ${TLS_KEY_PATH}, cert: ${TLS_CERT_PATH}). Generate with: openssl req -x509 -newkey rsa:4096 -keyout ${TLS_KEY_PATH} -out ${TLS_CERT_PATH} -days 365 -nodes -subj "/CN=localhost" or set USE_TLS=false`
       );
-      console.error("\nOr disable TLS by setting USE_TLS=false");
       process.exit(1);
     }
   }
@@ -44,7 +43,7 @@ async function main() {
 
   const protocol = USE_TLS ? "wss" : "ws";
   console.log(`\nServer running at ${protocol}://${HOSTNAME}:${PORT}`);
-  console.log("Health check at: http://localhost:" + PORT + "/health");
+  console.log(`Health check at: ${USE_TLS ? "https" : "http"}://localhost:${PORT}/health`);
   console.log("\nPress Ctrl+C to stop");
 
   // Handle graceful shutdown
@@ -66,7 +65,7 @@ async function main() {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
-main().catch((error) => {
-  console.error("Failed to start server:", error);
+main().catch((err) => {
+  logError("Startup", "Failed to start server", err);
   process.exit(1);
 });

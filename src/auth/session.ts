@@ -1,5 +1,6 @@
 import type { ServerWebSocket } from "bun";
 import type { Session, WebSocketData, KickedMessage } from "../types";
+import { error as logError } from "../logger";
 
 // Session token -> Session
 const sessions = new Map<string, Session>();
@@ -33,17 +34,16 @@ function cleanupExpiredSessions(): void {
   for (const token of expiredTokens) {
     const session = sessions.get(token);
     if (session) {
-      // Close WebSocket if still connected
       if (session.ws) {
-        session.ws.close(1000, "Session expired");
+        try {
+          session.ws.close(1000, "Session expired");
+        } catch (err) {
+          logError("Session", `Error closing expired session (username: ${session.username})`, err);
+        }
       }
       userSessions.delete(session.username);
       sessions.delete(token);
     }
-  }
-
-  if (expiredTokens.length > 0) {
-    console.log(`[Session] Cleaned up ${expiredTokens.length} expired sessions`);
   }
 }
 
@@ -64,13 +64,17 @@ export function createSession(
   if (existingToken) {
     const existingSession = sessions.get(existingToken);
     if (existingSession?.ws) {
-      // Kick the old session
-      const kickMessage: KickedMessage = {
-        type: "kicked",
-        reason: "logged_in_elsewhere",
-      };
-      existingSession.ws.send(JSON.stringify(kickMessage));
-      existingSession.ws.close(1000, "Logged in from another location");
+      try {
+        const kickMessage: KickedMessage = {
+          type: "kicked",
+          reason: "logged_in_elsewhere",
+        };
+        existingSession.ws.send(JSON.stringify(kickMessage));
+        existingSession.ws.close(1000, "Logged in from another location");
+      } catch (err) {
+        logError("Session", `Failed to kick existing session (username: ${username})`, err);
+        existingSession.ws.close(1000, "Logged in from another location");
+      }
     }
     // Remove old session
     sessions.delete(existingToken);
@@ -163,6 +167,11 @@ export function sendToUser(
   const session = getSessionByUsername(username);
   if (!session?.ws) return false;
 
-  session.ws.send(JSON.stringify(message));
-  return true;
+  try {
+    session.ws.send(JSON.stringify(message));
+    return true;
+  } catch (err) {
+    logError("Session", `Failed to send to user (username: ${username}, messageType: ${(message as { type?: string }).type ?? "unknown"})`, err);
+    return false;
+  }
 }
