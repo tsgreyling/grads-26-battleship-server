@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 import type { WebSocketData } from "./types";
 import { handleMessage, handleDisconnect } from "./protocol/handler";
 import { cleanupRateLimits } from "./middleware/rateLimit";
+import { error as logError } from "./logger";
 
 export interface ServerConfig {
   port: number;
@@ -41,6 +42,7 @@ export function createServer(config: ServerConfig) {
       if (config.allowedOrigins && config.allowedOrigins.length > 0) {
         const origin = req.headers.get("origin");
         if (!origin || !config.allowedOrigins.includes(origin)) {
+          logError("HTTP", `Invalid origin rejected (origin: ${origin ?? "missing"}, url: ${req.url})`);
           return new Response("Forbidden: Invalid origin", { status: 403 });
         }
       }
@@ -56,6 +58,7 @@ export function createServer(config: ServerConfig) {
         return undefined;
       }
 
+      logError("HTTP", `WebSocket upgrade failed (url: ${req.url})`);
       return new Response("WebSocket upgrade failed", { status: 400 });
     },
 
@@ -69,8 +72,8 @@ export function createServer(config: ServerConfig) {
 
         try {
           await handleMessage(ws, msgStr);
-        } catch (error) {
-          console.error("[WebSocket] Error handling message:", error);
+        } catch (err) {
+          logError("WebSocket", `Error handling message (user: ${ws.data.username ?? "anonymous"}, preview: ${msgStr.slice(0, 100)})`, err);
           ws.send(
             JSON.stringify({
               type: "error",
@@ -88,8 +91,8 @@ export function createServer(config: ServerConfig) {
         handleDisconnect(ws);
       },
 
-      error(ws: ServerWebSocket<WebSocketData>, error: Error) {
-        console.error(`[WebSocket] Error:`, error);
+      error(ws: ServerWebSocket<WebSocketData>, err: Error) {
+        logError("WebSocket", `Connection error (user: ${ws.data.username ?? "anonymous"})`, err);
       },
 
       // Enable compression

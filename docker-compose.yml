@@ -1,0 +1,18 @@
+services:
+  battleship-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: battleship-server
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      - SERVER_HOST=0.0.0.0
+      - USE_TLS=${USE_TLS:-false}
+      - TLS_KEY_PATH=/app/certs/key.pem
+      - TLS_CERT_PATH=/app/certs/cert.pem
+    # Uncomment to enable TLS with mounted certificates (also set USE_TLS=true above):
+    # volumes:
+    #   - ./certs:/app/certs:ro
+    restart: unless-stopped

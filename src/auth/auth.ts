@@ -3,6 +3,7 @@ import type { WebSocketData, AuthSuccessMessage, AuthErrorMessage } from "../typ
 import { verifyPassword } from "./password";
 import { createSession, invalidateSession, getSession } from "./session";
 import { createUser, getUser } from "../user/user";
+import { error as logError } from "../logger";
 
 const USERNAME_MIN_LENGTH = 3;
 const USERNAME_MAX_LENGTH = 20;
@@ -71,10 +72,11 @@ export async function register(
         stats: user.stats,
       },
     };
-  } catch (error) {
+  } catch (err) {
+    logError("Auth", `Registration failed (username: ${username})`, err);
     return {
       type: "auth_error",
-      message: error instanceof Error ? error.message : "Registration failed",
+      message: err instanceof Error ? err.message : "Registration failed",
     };
   }
 }

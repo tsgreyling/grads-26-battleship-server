@@ -344,6 +344,47 @@ src/
     └── messages.ts    # Message parsing/validation
 ```
 
+## Docker (multi-platform: amd64 + arm64 / Mac)
+
+The image supports **linux/amd64** and **linux/arm64** so it can be pulled on x86 servers and on Mac (Apple Silicon). If you see:
+
+```text
+no matching manifest for linux/arm64/v8 in the manifest list entries
+```
+
+the image was built for a single platform. Build and push a multi-platform image:
+
+**One-time: enable buildx and create a builder (if not already):**
+
+```bash
+docker buildx create --name multiarch --use
+```
+
+**Build and push for both platforms:**
+
+```bash
+# Replace with your registry and tag, e.g. ghcr.io/yourorg/battleship-server:latest
+docker buildx build --platform linux/amd64,linux/arm64 -t YOUR_IMAGE:TAG --push .
+```
+
+Or use the script (Mac/Linux):
+
+```bash
+chmod +x scripts/build-multiarch.sh
+./scripts/build-multiarch.sh YOUR_IMAGE:TAG
+```
+
+On Windows (PowerShell), run the same `docker buildx build ...` command. After pushing, `docker pull YOUR_IMAGE:TAG` will work on both x86 and Mac (arm64).
+
+**Local run (no registry):**
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+Compose will build for your current platform only. Use the multi-platform build above when pushing to a registry so others (e.g. on Mac) can pull the image.
+
 ## Security Features
 
 - **TLS/SSL encryption** for all WebSocket traffic

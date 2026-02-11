@@ -1,0 +1,14 @@
+.git
+node_modules
+certs/
+README.md
+CLIENT_PROTOCOL_SPEC.md
+Dockerfile
+docker-compose.yml
+.dockerignore
+.vscode
+.idea
+.serena
+.claude
+.DS_Store
+Thumbs.db
