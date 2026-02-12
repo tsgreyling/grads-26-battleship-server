@@ -2,10 +2,12 @@ import type { ServerWebSocket } from "bun";
 import type { WebSocketData } from "./types";
 import { handleMessage, handleDisconnect, applyReconnectionState } from "./protocol/handler";
 import { getUsernameForToken } from "./auth/auth";
-import { attachWebSocketToSession } from "./auth/session";
+import { attachWebSocketToSession, loadSessionsFromFile, saveSessionsToFile } from "./auth/session";
 import { getUser } from "./user/user";
 import { cleanupRateLimits } from "./middleware/rateLimit";
-import { error as logError } from "./logger";
+import { info as logInfo, error as logError } from "./logger";
+import { loadPersistedGames } from "./game/game";
+import { ensureDataDir } from "./game/persistence";
 
 export interface ServerConfig {
   port: number;
@@ -18,6 +20,12 @@ export interface ServerConfig {
 }
 
 export function createServer(config: ServerConfig) {
+  // Ensure data directory exists and load persisted data
+  ensureDataDir();
+  loadSessionsFromFile();
+  loadPersistedGames();
+  logInfo("Server", "Loaded persisted sessions and games");
+
   const tlsConfig = config.tls
     ? {
         key: Bun.file(config.tls.keyPath),
@@ -27,6 +35,11 @@ export function createServer(config: ServerConfig) {
 
   // Periodic cleanup of rate limits
   setInterval(cleanupRateLimits, 60000);
+
+  // Periodic save of sessions (every 5 minutes as backup)
+  setInterval(() => {
+    saveSessionsToFile();
+  }, 5 * 60 * 1000);
 
   const server = Bun.serve<WebSocketData>({
     port: config.port,
@@ -70,12 +83,14 @@ export function createServer(config: ServerConfig) {
 
     websocket: {
       open(ws: ServerWebSocket<WebSocketData>) {
-        console.log(`[WebSocket] New connection`);
-        if (ws.data.sessionToken && ws.data.username) {
-          const session = attachWebSocketToSession(ws.data.sessionToken, ws);
+        const withToken = !!(ws.data.sessionToken && ws.data.username);
+        logInfo("WebSocket", `New connection${withToken ? ` (resume: ${ws.data.username})` : ""}`);
+        if (withToken) {
+          const session = attachWebSocketToSession(ws.data.sessionToken!, ws);
           if (session) {
             const user = getUser(session.username);
             if (user) {
+              logInfo("WebSocket", `Session resumed for ${session.username}`);
               ws.send(
                 JSON.stringify({
                   type: "auth_success",
@@ -114,8 +129,9 @@ export function createServer(config: ServerConfig) {
       },
 
       close(ws: ServerWebSocket<WebSocketData>, code: number, reason: string) {
-        console.log(
-          `[WebSocket] Connection closed: ${ws.data.username || "anonymous"} (${code}: ${reason})`
+        logInfo(
+          "WebSocket",
+          `Connection closed: ${ws.data.username || "anonymous"} (${code}: ${reason})`
         );
         handleDisconnect(ws);
       },
@@ -142,10 +158,10 @@ export function createServer(config: ServerConfig) {
  * Gracefully shut down the server.
  */
 export async function shutdownServer(server: ReturnType<typeof Bun.serve>): Promise<void> {
-  console.log("[Server] Closing server...");
+  logInfo("Server", "Closing server...");
   
   // Stop accepting new connections
   server.stop();
   
-  console.log("[Server] Server stopped");
+  logInfo("Server", "Server stopped");
 }

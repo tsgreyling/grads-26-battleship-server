@@ -34,6 +34,7 @@ export function parseMessage(raw: string): ClientMessage | null {
       case "logout":
       case "list_players":
       case "forfeit":
+      case "ping":
         return data as ClientMessage;
 
       case "send_invite":

@@ -155,9 +155,10 @@ export function validateShipPlacements(
 
 /**
  * Create a Board from validated ship placements.
- * NOTE: Assumes placements are already validated by validateShipPlacements().
+ * Returns null if placements are invalid (defensive check).
  */
 export function createBoard(placements: ShipPlacement[]): Board | null {
+  if (validateShipPlacements(placements).length > 0) return null;
 
   const ships: PlacedShip[] = [];
   const allShipTiles = new Set<string>();

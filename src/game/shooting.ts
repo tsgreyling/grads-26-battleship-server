@@ -1,7 +1,7 @@
 import type { Game, ShipType } from "../types";
 import { parseCoordinate, normalizeCoordinate } from "./board";
 import { getShipAtCoordinate, isShipSunk, areAllShipsSunk } from "./ship";
-import { getPlayerIndex, getOpponentIndex, switchTurn, isPlayerTurn } from "./game";
+import { getPlayerIndex, getOpponentIndex, switchTurn, isPlayerTurn, persistGames } from "./game";
 
 export interface ShotOutcome {
   success: boolean;
@@ -92,6 +92,9 @@ export function processShot(
 
   // Switch turn (even on miss)
   switchTurn(game);
+
+  // Persist game state after shot
+  persistGames();
 
   return {
     success: true,

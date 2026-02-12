@@ -313,18 +313,21 @@ Validation failure:
 When both players are ready:
 
 ```json
-{ "type": "game_start", "yourTurn": true, "opponent": "player2" }
+{ "type": "game_start", "yourTurn": true, "opponent": "player2", "gameId": "uuid-optional" }
 ```
+
+- **gameId** (optional): Present when the game is already created (e.g. after both placed ships or on reconnection). Use it to match `reconnect_game_state` to the correct game.
 
 ## Reconnect game state
 
-When a user reconnects (resume or `?token=...`) and they are already in a game, the server sends `reconnect_game_state` so the client can restore the board and progress without losing ship placements or shot history.
+When a user reconnects (login again, resume with session token, or `?token=...` in the WebSocket URL) and they are already in a game, the server sends `game_start` (with `gameId`) then `reconnect_game_state` so the client can restore the board and progress without losing ship placements or shot history.
 
 Server -> Client (after `game_start` when reconnecting in **playing** phase, or after `waiting_for_opponent` when in **setup** with ships already placed):
 
 ```json
 {
   "type": "reconnect_game_state",
+  "gameId": "same-uuid-as-game_start",
   "ships": [
     { "type": "carrier", "tiles": ["A1", "A2", "A3", "A4", "A5"], "hits": ["A3"] },
     { "type": "battleship", "tiles": ["C3", "D3", "E3", "F3"], "hits": [] }
@@ -336,8 +339,9 @@ Server -> Client (after `game_start` when reconnecting in **playing** phase, or 
 }
 ```
 
-- **ships** (optional): Your current ship placements and which tiles have been hit. Omitted if you have not placed ships yet. Use this to restore your defensive board.
-- **shots** (optional): Shots you have made (playing phase only). Each has `coordinate`, `hit` (boolean), and `sunk` (ship type if that shot sank a ship, else `null`). Use this to restore your attack board.
+- **gameId**: Same as in `game_start`; use it to associate this state with the correct game.
+- **ships**: Your current ship placements and which tiles have been hit. Empty array `[]` if you have not placed ships yet. Use this to restore your defensive board.
+- **shots**: Shots you have made (playing phase; empty array in setup). Each has `coordinate`, `hit` (boolean), and `sunk` (ship type if that shot sank a ship, else `null`). Use this to restore your attack board.
 
 Restore local state from this message so the user can continue where they left off after a refresh.
 

@@ -271,6 +271,8 @@ export interface GameStartMessage {
   type: "game_start";
   yourTurn: boolean;
   opponent: string;
+  /** Present when reconnecting or when game is already created (e.g. after both placed ships). */
+  gameId?: string;
 }
 
 export interface WaitingForOpponentMessage {
@@ -294,10 +296,12 @@ export interface SerializedShot {
 /** Sent on reconnection so client can restore board and shot history. */
 export interface ReconnectGameStateMessage {
   type: "reconnect_game_state";
-  /** Current ship placements and hits (setup or playing). Omitted if no ships placed yet. */
-  ships?: SerializedPlacedShip[];
-  /** Shots this player has made (playing only). */
-  shots?: SerializedShot[];
+  /** Game id so client can match state to the correct game. */
+  gameId: string;
+  /** Current ship placements and hits (setup or playing). Empty array if no ships placed yet. */
+  ships: SerializedPlacedShip[];
+  /** Shots this player has made (playing only). Empty array in setup or if none yet. */
+  shots: SerializedShot[];
 }
 
 export interface ShotResultMessage {

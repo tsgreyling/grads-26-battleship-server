@@ -1,7 +1,7 @@
 import { createServer, shutdownServer } from "./server";
 import { stopSessionCleanup } from "./auth/session";
 import { stopInviteCleanup } from "./lobby/invite";
-import { error as logError } from "./logger";
+import { info as logInfo, error as logError } from "./logger";
 
 // Configuration from environment variables
 const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -11,10 +11,10 @@ const TLS_CERT_PATH = process.env.TLS_CERT_PATH || "./certs/cert.pem";
 const USE_TLS = process.env.USE_TLS !== "false";
 
 async function main() {
-  console.log("Starting Battleship Server...");
-  console.log(`Port: ${PORT}`);
-  console.log(`Hostname: ${HOSTNAME}`);
-  console.log(`TLS: ${USE_TLS ? "enabled" : "disabled"}`);
+  logInfo("Startup", "Starting Battleship Server...");
+  logInfo("Startup", `Port: ${PORT}`);
+  logInfo("Startup", `Hostname: ${HOSTNAME}`);
+  logInfo("Startup", `TLS: ${USE_TLS ? "enabled" : "disabled"}`);
 
   // Check for TLS certificates if TLS is enabled
   if (USE_TLS) {
@@ -42,13 +42,13 @@ async function main() {
   });
 
   const protocol = USE_TLS ? "wss" : "ws";
-  console.log(`\nServer running at ${protocol}://${HOSTNAME}:${PORT}`);
-  console.log(`Health check at: ${USE_TLS ? "https" : "http"}://localhost:${PORT}/health`);
-  console.log("\nPress Ctrl+C to stop");
+  logInfo("Startup", `Server running at ${protocol}://${HOSTNAME}:${PORT}`);
+  logInfo("Startup", `Health check at: ${USE_TLS ? "https" : "http"}://localhost:${PORT}/health`);
+  logInfo("Startup", "Press Ctrl+C to stop");
 
   // Handle graceful shutdown
   const shutdown = async (signal: string) => {
-    console.log(`\n${signal} received, shutting down gracefully...`);
+    logInfo("Shutdown", `${signal} received, shutting down gracefully...`);
 
     // Stop accepting new connections and close existing ones
     await shutdownServer(server);
@@ -57,7 +57,7 @@ async function main() {
     stopSessionCleanup();
     stopInviteCleanup();
 
-    console.log("Server shut down successfully");
+    logInfo("Shutdown", "Server shut down successfully");
     process.exit(0);
   };
 

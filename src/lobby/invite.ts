@@ -1,6 +1,7 @@
 import type { Invite, InviteCancelledMessage } from "../types";
 import { isUserInGame } from "../game/game";
 import { sendToUser } from "../auth/session";
+import { info as logInfo } from "../logger";
 
 // Invite storage
 const invites = new Map<string, Invite>();
@@ -61,7 +62,7 @@ function cleanupExpiredInvites(): void {
   }
 
   if (expiredInvites.length > 0) {
-    console.log(`[Invite] Cleaned up ${expiredInvites.length} expired invites`);
+    logInfo("Invite", `Cleaned up ${expiredInvites.length} expired invites`);
   }
 }
 
@@ -274,11 +275,4 @@ export function cancelAllUserInvites(username: string): Invite[] {
   }
 
   return cancelled;
-}
-
-/**
- * Get count of pending invites.
- */
-export function getPendingInviteCount(): number {
-  return invites.size;
 }
