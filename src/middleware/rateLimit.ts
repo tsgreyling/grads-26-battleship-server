@@ -1,7 +1,7 @@
 import type { RateLimitConfig, RateLimitEntry } from "../types";
 
 // Rate limit configurations for different action types
-export const RATE_LIMITS: Record<string, RateLimitConfig> = {
+const RATE_LIMITS: Record<string, RateLimitConfig> = {
   auth: {
     maxRequests: 5,
     windowMs: 60000, // 5 auth attempts per minute
@@ -36,7 +36,7 @@ function cleanupTimestamps(entry: RateLimitEntry, windowMs: number): void {
  * Check if a user is rate limited for a specific action.
  * Returns the number of milliseconds until they can retry, or 0 if not limited.
  */
-export function checkRateLimit(
+function checkRateLimit(
   username: string,
   actionType: string
 ): { limited: boolean; retryAfter: number } {
@@ -79,7 +79,7 @@ export function checkRateLimit(
  * Record an action for rate limiting.
  * Should be called after checkRateLimit returns limited: false.
  */
-export function recordAction(username: string, actionType: string): void {
+function recordAction(username: string, actionType: string): void {
   let userLimits = userRateLimits.get(username);
   if (!userLimits) {
     userLimits = new Map();

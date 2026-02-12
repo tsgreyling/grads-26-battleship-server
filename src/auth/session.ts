@@ -1,6 +1,10 @@
 import type { ServerWebSocket } from "bun";
 import type { Session, WebSocketData, KickedMessage } from "../types";
-import { error as logError } from "../logger";
+import { info as logInfo, error as logError } from "../logger";
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
+
+const DATA_DIR = "./data";
+const SESSIONS_FILE = `${DATA_DIR}/sessions.json`;
 
 // Session token -> Session
 const sessions = new Map<string, Session>();
@@ -70,10 +74,13 @@ export function createSession(
           reason: "logged_in_elsewhere",
         };
         existingSession.ws.send(JSON.stringify(kickMessage));
-        existingSession.ws.close(1000, "Logged in from another location");
       } catch (err) {
         logError("Session", `Failed to kick existing session (username: ${username})`, err);
+      }
+      try {
         existingSession.ws.close(1000, "Logged in from another location");
+      } catch (err) {
+        logError("Session", `Error closing session (username: ${username})`, err);
       }
     }
     // Remove old session
@@ -95,6 +102,9 @@ export function createSession(
   // Update WebSocket data
   ws.data.sessionToken = token;
   ws.data.username = username;
+
+  // Persist sessions after creation
+  saveSessionsToFile();
 
   return session;
 }
@@ -139,6 +149,9 @@ export function invalidateSession(token: string): boolean {
 
   userSessions.delete(session.username);
   sessions.delete(token);
+
+  // Persist sessions after invalidation
+  saveSessionsToFile();
   return true;
 }
 
@@ -147,6 +160,41 @@ export function clearSessionWebSocket(token: string): void {
   if (session) {
     session.ws = null;
   }
+}
+
+/**
+ * Attach a WebSocket to an existing session (resume). If the session already has
+ * a different WebSocket, that connection is kicked. Returns the session if valid.
+ */
+export function attachWebSocketToSession(
+  token: string,
+  ws: ServerWebSocket<WebSocketData>
+): Session | undefined {
+  const session = getSession(token);
+  if (!session) return undefined;
+
+  if (session.ws != null && session.ws !== ws) {
+    try {
+      const kickMessage: KickedMessage = {
+        type: "kicked",
+        reason: "logged_in_elsewhere",
+      };
+      session.ws.send(JSON.stringify(kickMessage));
+    } catch (err) {
+      logError("Session", `Failed to kick existing session (username: ${session.username})`, err);
+    }
+    try {
+      session.ws.close(1000, "Logged in from another location");
+    } catch (err) {
+      logError("Session", `Error closing session (username: ${session.username})`, err);
+    }
+  }
+
+  session.ws = ws;
+  ws.data.sessionToken = token;
+  ws.data.username = session.username;
+
+  return session;
 }
 
 export function getOnlineUsers(): string[] {
@@ -173,5 +221,77 @@ export function sendToUser(
   } catch (err) {
     logError("Session", `Failed to send to user (username: ${username}, messageType: ${(message as { type?: string }).type ?? "unknown"})`, err);
     return false;
+  }
+}
+
+// ============ Session Persistence ============
+
+interface SerializedSession {
+  token: string;
+  username: string;
+  createdAt: string;
+}
+
+function ensureDataDir(): void {
+  if (!existsSync(DATA_DIR)) {
+    mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Save all sessions to file.
+ */
+export function saveSessionsToFile(): void {
+  ensureDataDir();
+
+  const serialized: SerializedSession[] = [];
+  for (const session of sessions.values()) {
+    // Only save non-expired sessions
+    if (!isSessionExpired(session)) {
+      serialized.push({
+        token: session.token,
+        username: session.username,
+        createdAt: session.createdAt.toISOString(),
+      });
+    }
+  }
+
+  try {
+    writeFileSync(SESSIONS_FILE, JSON.stringify(serialized, null, 2));
+  } catch (err) {
+    logError("Session", "Failed to save sessions to file", err);
+  }
+}
+
+/**
+ * Load sessions from file.
+ */
+export function loadSessionsFromFile(): void {
+  if (!existsSync(SESSIONS_FILE)) {
+    return;
+  }
+
+  try {
+    const data = readFileSync(SESSIONS_FILE, "utf-8");
+    const serialized: SerializedSession[] = JSON.parse(data);
+
+    for (const item of serialized) {
+      const session: Session = {
+        token: item.token,
+        username: item.username,
+        createdAt: new Date(item.createdAt),
+        ws: null, // WebSocket will be re-attached on reconnect
+      };
+
+      // Only load non-expired sessions
+      if (!isSessionExpired(session)) {
+        sessions.set(session.token, session);
+        userSessions.set(session.username, session.token);
+      }
+    }
+
+    logInfo("Session", `Loaded ${sessions.size} session(s) from storage`);
+  } catch (err) {
+    logError("Session", "Failed to load sessions from file", err);
   }
 }

@@ -1,5 +1,6 @@
 /**
- * Error-only logger. All output goes to stderr with a consistent format.
+ * Logger for server output. Uses console so logs show in the terminal
+ * when running locally (e.g. `bun run dev`) and in Docker.
  */
 
 function formatError(err: unknown): string {
@@ -10,14 +11,20 @@ function formatError(err: unknown): string {
 }
 
 /**
+ * Log an info message. Use context (e.g. "Server", "WebSocket") and message.
+ */
+export function info(context: string, message: string): void {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [${context}] ${message}`);
+}
+
+/**
  * Log an error. Use context (e.g. "WebSocket", "Auth") and message; optional error object for stack traces.
  */
 export function error(context: string, message: string, err?: unknown): void {
   const timestamp = new Date().toISOString();
-  const prefix = `[${timestamp}] [${context}] ERROR: ${message}`;
+  console.error(`[${timestamp}] [${context}] ERROR: ${message}`);
   if (err !== undefined && err !== null) {
-    console.error(prefix, "\n", formatError(err));
-  } else {
-    console.error(prefix);
+    console.error(formatError(err));
   }
 }

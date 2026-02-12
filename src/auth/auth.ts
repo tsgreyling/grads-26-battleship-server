@@ -1,7 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import type { WebSocketData, AuthSuccessMessage, AuthErrorMessage } from "../types";
 import { verifyPassword } from "./password";
-import { createSession, invalidateSession, getSession } from "./session";
+import { createSession, invalidateSession, getSession, attachWebSocketToSession } from "./session";
 import { createUser, getUser } from "../user/user";
 import { error as logError } from "../logger";
 
@@ -118,6 +118,48 @@ export async function login(
 
 export function logout(token: string): boolean {
   return invalidateSession(token);
+}
+
+/**
+ * Resume a session by token (attach this WebSocket to existing session).
+ * Returns auth_success with user info or auth_error if token invalid/expired.
+ */
+export function resumeSession(
+  token: string,
+  ws: ServerWebSocket<WebSocketData>
+): AuthSuccessMessage | AuthErrorMessage {
+  if (!token || typeof token !== "string" || token.trim() === "") {
+    return { type: "auth_error", message: "Invalid session token" };
+  }
+
+  const session = attachWebSocketToSession(token.trim(), ws);
+  if (!session) {
+    return { type: "auth_error", message: "Session expired or invalid" };
+  }
+
+  const user = getUser(session.username);
+  if (!user) {
+    return { type: "auth_error", message: "User not found" };
+  }
+
+  return {
+    type: "auth_success",
+    sessionToken: session.token,
+    user: {
+      username: user.username,
+      stats: user.stats,
+    },
+  };
+}
+
+/**
+ * Validate token for upgrade (no WebSocket yet). Returns username if valid, null otherwise.
+ * Used when client connects with ?token=... so we can pass session data into upgrade.
+ */
+export function getUsernameForToken(token: string | null): string | null {
+  if (!token || typeof token !== "string" || token.trim() === "") return null;
+  const session = getSession(token.trim());
+  return session ? session.username : null;
 }
 
 export function isAuthenticated(ws: ServerWebSocket<WebSocketData>): boolean {

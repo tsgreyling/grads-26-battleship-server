@@ -6,10 +6,13 @@ import type {
   ErrorMessage,
   RateLimitedMessage,
   ShipPlacement,
+  GameStatus,
 } from "../types";
 import { parseMessage, requiresAuth, isAllowedInSetup, isAllowedInGameplay, isAllowedInLobby, sanitizeUsername, sanitizeCoordinate } from "./messages";
-import { register, login, logout, isAuthenticated, getAuthenticatedUsername } from "../auth/auth";
+import { register, login, logout, resumeSession, isAuthenticated, getAuthenticatedUsername } from "../auth/auth";
 import { clearSessionWebSocket, sendToUser, getSessionByUsername } from "../auth/session";
+import { info as logInfo } from "../logger";
+import { serializeBoardForReconnect, getShotHistoryWithResults } from "../game/reconnect";
 import { getAvailablePlayers, setUserStatus, removeUserStatus } from "../lobby/lobby";
 import {
   createInvite,
@@ -62,9 +65,13 @@ export async function handleMessage(
   // Parse message
   const message = parseMessage(rawMessage);
   if (!message) {
+    logInfo("Protocol", "Invalid message format (parse failed)");
     sendError(ws, "INVALID_MESSAGE", "Invalid message format");
     return;
   }
+
+  const clientId = ws.data.username ?? "anonymous";
+  logInfo("Protocol", `Message: ${message.type} (${clientId})`);
 
   // Check rate limiting for authenticated users
   const username = getAuthenticatedUsername(ws);
@@ -119,6 +126,10 @@ export async function handleMessage(
       await handleLogin(ws, message.username, message.password);
       break;
 
+    case "resume":
+      await handleResume(ws, message.sessionToken);
+      break;
+
     case "logout":
       handleLogout(ws);
       break;
@@ -149,6 +160,11 @@ export async function handleMessage(
 
     case "forfeit":
       handleForfeit(ws);
+      break;
+
+    case "ping":
+      // Respond with pong to keep connection alive
+      ws.send(JSON.stringify({ type: "pong" }));
       break;
   }
 }
@@ -189,42 +205,117 @@ async function handleLogin(
   send(ws, result);
 
   if (result.type === "auth_success") {
-    // Check if user was in a game (reconnection)
-    const game = getGameByUsername(username);
-    if (game && game.status !== "finished") {
-      setUserStatus(username, "in_game");
+    logInfo("Protocol", `User ${sanitized} logged in`);
+    applyReconnectionState(ws, sanitized);
+  }
+}
 
-      // Clear disconnect timer if this was a reconnection
-      if (game.disconnectedPlayer === username) {
-        clearDisconnectTimer(game);
+async function handleResume(
+  ws: ServerWebSocket<WebSocketData>,
+  sessionToken: string
+): Promise<void> {
+  const result = resumeSession(sessionToken, ws);
+  send(ws, result);
 
-        // Notify opponent of reconnection
-        const opponentUsername = getOpponentUsername(game, username);
-        if (opponentUsername) {
-          sendToUser(opponentUsername, { type: "opponent_reconnected" });
-        }
-      }
+  if (result.type === "auth_success") {
+    logInfo("Protocol", `User ${result.user.username} resumed session`);
+    applyReconnectionState(ws, result.user.username);
+  }
+}
 
-      // Send game state to reconnected player
-      const playerIndex = getPlayerIndex(game, username);
-      const yourTurn = game.currentTurn === playerIndex;
-      const opponentUsername = getOpponentUsername(game, username);
+/**
+ * After successful login or resume: restore user status, clear disconnect timer if needed,
+ * send game state (and reconnect_game_state with ships/shots) so the client can continue where they left off.
+ *
+ * CRITICAL: Uses atomic snapshot to prevent race conditions where game state changes
+ * between reading and using it. This ensures the client receives a coherent view of
+ * the game state at a single point in time.
+ */
+export function applyReconnectionState(
+  ws: ServerWebSocket<WebSocketData>,
+  username: string
+): void {
+  const game = getGameByUsername(username);
+  if (!game || game.status === "finished") {
+    logInfo("Reconnect", `${username}: no active game or finished (game=${game ? game.status : "none"})`);
+    setUserStatus(username, "lobby");
+    return;
+  }
 
-      if (game.status === "playing") {
-        send(ws, {
-          type: "game_start",
-          yourTurn,
-          opponent: opponentUsername || "Unknown",
-        });
-      } else if (game.status === "setup") {
-        const player = game.players[playerIndex];
-        if (player.ready) {
-          send(ws, { type: "waiting_for_opponent" });
-        }
-      }
-    } else {
-      setUserStatus(username, "lobby");
+  const playerIndex = getPlayerIndex(game, username);
+  if (playerIndex < 0) {
+    logInfo("Reconnect", `${username}: player not in game (playerIndex=${playerIndex})`);
+    setUserStatus(username, "lobby");
+    return;
+  }
+  const idx = playerIndex as 0 | 1;
+  const player = game.players[idx];
+
+  // CRITICAL FIX: Create an atomic snapshot of game state at this moment.
+  // This prevents race conditions where opponent's actions (shots, game end, etc.)
+  // could change game state between when we read it and when we use it.
+  // See RACE_CONDITIONS_ANALYSIS.md for detailed explanation.
+  const stateSnapshot = {
+    gameId: game.id,
+    status: game.status,
+    currentTurn: game.currentTurn,
+    yourTurn: game.currentTurn === idx,
+    opponentUsername: getOpponentUsername(game, username),
+    playerReady: player.ready,
+    playerBoard: player.board,
+    shipCount: player.board ? player.board.ships.length : 0,
+  };
+
+  const hasBoard = stateSnapshot.playerBoard != null;
+  logInfo(
+    "Reconnect",
+    `${username}: gameId=${stateSnapshot.gameId} status=${stateSnapshot.status} playerIndex=${idx} hasBoard=${hasBoard} shipCount=${stateSnapshot.shipCount}`
+  );
+
+  setUserStatus(username, "in_game");
+
+  // Handle disconnect timer and opponent notification (uses game reference for mutable operations)
+  if (game.disconnectedPlayer === username) {
+    clearDisconnectTimer(game);
+    if (stateSnapshot.opponentUsername) {
+      sendToUser(stateSnapshot.opponentUsername, { type: "opponent_reconnected" });
     }
+  }
+
+  // All subsequent operations use the snapshot (immutable values from one point in time)
+  if (stateSnapshot.status === "playing") {
+    send(ws, {
+      type: "game_start",
+      yourTurn: stateSnapshot.yourTurn,
+      opponent: stateSnapshot.opponentUsername || "Unknown",
+      gameId: stateSnapshot.gameId,
+    });
+    const playingShots = getShotHistoryWithResults(game, idx);
+    const ships = stateSnapshot.playerBoard ? serializeBoardForReconnect(stateSnapshot.playerBoard) : [];
+    send(ws, {
+      type: "reconnect_game_state",
+      gameId: stateSnapshot.gameId,
+      ships,
+      shots: playingShots,
+    });
+    logInfo(
+      "Reconnect",
+      `${username}: sending reconnect_game_state gameId=${stateSnapshot.gameId} ships=${ships.length} shots=${playingShots.length}`
+    );
+  } else if (stateSnapshot.status === "setup") {
+    if (stateSnapshot.playerReady) {
+      send(ws, { type: "waiting_for_opponent" });
+    }
+    const ships = stateSnapshot.playerBoard ? serializeBoardForReconnect(stateSnapshot.playerBoard) : [];
+    logInfo("Reconnect", `${username}: sending reconnect_game_state (setup) gameId=${stateSnapshot.gameId} ships=${ships.length}`);
+    send(ws, {
+      type: "reconnect_game_state",
+      gameId: stateSnapshot.gameId,
+      ships,
+      shots: [],
+    });
+  } else {
+    setUserStatus(username, "lobby");
   }
 }
 
@@ -410,8 +501,9 @@ function handlePlaceShips(
 
   send(ws, { type: "ships_accepted" });
 
-  // Check if both players are ready
-  if (game.status === "playing") {
+  // Check if both players are ready (placeShips may have set status to "playing")
+  const statusAfterPlace = game.status as GameStatus;
+  if (statusAfterPlace === "playing") {
     // Game has started, notify both players
     const player0Turn = game.currentTurn === 0;
 
@@ -419,12 +511,14 @@ function handlePlaceShips(
       type: "game_start",
       yourTurn: player0Turn,
       opponent: game.players[1].username,
+      gameId: game.id,
     });
 
     sendToUser(game.players[1].username, {
       type: "game_start",
       yourTurn: !player0Turn,
       opponent: game.players[0].username,
+      gameId: game.id,
     });
   } else {
     // Waiting for opponent
@@ -461,6 +555,12 @@ function handleShoot(
     return;
   }
 
+  // processShot sets coordinate and hit on success; guard for type safety
+  if (result.coordinate === undefined || result.hit === undefined) {
+    send(ws, { type: "game_error", message: "Shot failed" });
+    return;
+  }
+
   const opponentUsername = getOpponentUsername(game, username);
   if (!opponentUsername) {
     send(ws, { type: "game_error", message: "Could not find opponent" });
@@ -470,15 +570,15 @@ function handleShoot(
   // Send shot result to shooter
   send(ws, {
     type: "shot_result",
-    coordinate: result.coordinate!,
-    hit: result.hit!,
+    coordinate: result.coordinate,
+    hit: result.hit,
     sunk: result.sunkShip || null,
   });
 
   // Notify opponent that a shot was fired
   sendToUser(opponentUsername, {
     type: "shot_fired",
-    coordinate: result.coordinate!,
+    coordinate: result.coordinate,
     by: username,
   });
 

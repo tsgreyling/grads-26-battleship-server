@@ -33,7 +33,7 @@ export function removeUserStatus(username: string): void {
 /**
  * Get list of users available in lobby (not in games or pending invites).
  */
-export function getLobbyUsers(): LobbyUser[] {
+function getLobbyUsers(): LobbyUser[] {
   const onlineUsers = getOnlineUsers();
   const lobbyUsers: LobbyUser[] = [];
 

@@ -56,14 +56,6 @@ export function isValidCoordinate(coord: Coordinate): boolean {
 }
 
 /**
- * Check if a coordinate string is valid.
- */
-export function isValidCoordinateString(coord: string): boolean {
-  const parsed = parseCoordinate(coord);
-  return parsed !== null;
-}
-
-/**
  * Normalize a coordinate string to uppercase format (e.g., "a5" -> "A5").
  */
 export function normalizeCoordinate(coord: string): string | null {

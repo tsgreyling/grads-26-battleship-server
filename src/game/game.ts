@@ -6,12 +6,35 @@ import type {
   GameStatus,
 } from "../types";
 import { createBoard, validateShipPlacements } from "./ship";
+import { saveGamesToFile, loadGamesFromFile } from "./persistence";
 
 // In-memory game storage
-const games = new Map<string, Game>();
+let games = new Map<string, Game>();
 
 // Username -> Game ID lookup
-const userGames = new Map<string, string>();
+let userGames = new Map<string, string>();
+
+// Flag to track if we've loaded persisted data
+let persistenceLoaded = false;
+
+/**
+ * Load persisted games from file.
+ * Should be called once on server startup.
+ */
+export function loadPersistedGames(): void {
+  if (persistenceLoaded) return;
+  const loaded = loadGamesFromFile();
+  games = loaded.games;
+  userGames = loaded.userGames;
+  persistenceLoaded = true;
+}
+
+/**
+ * Save current games to file.
+ */
+export function persistGames(): void {
+  saveGamesToFile(games);
+}
 
 export function createGame(player1: string, player2: string): Game {
   const gameId = crypto.randomUUID();
@@ -44,6 +67,7 @@ export function createGame(player1: string, player2: string): Game {
   userGames.set(player1, gameId);
   userGames.set(player2, gameId);
 
+  persistGames();
   return game;
 }
 
@@ -114,6 +138,7 @@ export function placeShips(
     game.status = "playing";
   }
 
+  persistGames();
   return { success: true };
 }
 
@@ -143,6 +168,8 @@ export function endGame(
     clearTimeout(game.disconnectTimer);
     game.disconnectTimer = null;
   }
+
+  persistGames();
 }
 
 export function removeGame(gameId: string): void {
@@ -160,6 +187,8 @@ export function removeGame(gameId: string): void {
 
   // Remove game
   games.delete(gameId);
+
+  persistGames();
 }
 
 export function isUserInGame(username: string): boolean {
